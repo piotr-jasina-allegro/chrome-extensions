@@ -1,0 +1,60 @@
+{
+  "manifest_version": 3,
+  "name": "Boring Stuff Helper",
+  "version": "0.1.0",
+  "description": "Boring Stuff Helper",
+  "action": {
+    "default_icon": {
+      "16": "icon.png",
+      "48": "icon.png",
+      "128": "icon.png"
+    }
+  },
+  "side_panel": {
+    "default_path": "popup/popup.html"
+  },
+  "permissions": [
+    "contextMenus",
+    "sidePanel",
+    "scripting",
+    "storage",
+    "webRequest",
+    "tabs"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "js": [
+        "loader.js"
+      ],
+      "matches": [
+        "https://allegrogroup.atlassian.net/*",
+        "https://github.com/allegro-internal/opbox-web/pull/*",
+        "https://apreelts.azurewebsites.net/*",
+        "https://docs.google.com/spreadsheets/*",
+        "https://console.allegrogroup.com/*"
+      ]
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "*.js",
+        "favicon-32x32.png"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ],
+  "icons": {
+    "16": "icon.png",
+    "48": "icon.png",
+    "128": "icon.png"
+  }
+}
