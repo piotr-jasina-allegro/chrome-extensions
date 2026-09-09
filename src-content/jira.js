@@ -1,4 +1,4 @@
-import {getStatusMap} from "../utils.js";
+import {getStatusMap, getMonthStrings} from "../utils.js";
 
 const storeOnlyFirst = false // change to true to store only once per day
 
@@ -30,21 +30,9 @@ export function setupJira() {
             console.log("Map status:", JSON.stringify(getStatusMap()));
             const issues = data.issues
 
-            const today = new Date();
-            const year = today.getFullYear();
-            const month = String(today.getMonth() + 1).padStart(2, '0'); // dodajemy 1 i uzupełniamy zerem
-
-            const yearMonth = `${year}-${month}`;
-            const prevMonth = `${year}-${String(today.getMonth()).padStart(2, '0')}`;
+            const {current: yearMonth} = getMonthStrings();
 
             const stored = localStorage.getItem(`issuesMont-${yearMonth}`);
-
-            // migrate month
-            const storedMigrate = localStorage.getItem(`issuesMont-${prevMonth}`);
-            chrome.storage.local.set({
-                [`issuesMont-${prevMonth}`]: Array.from(new Map(JSON.parse(storedMigrate)).entries())
-            });
-            // migrate month
 
             var issuesMap;
             if (stored) {

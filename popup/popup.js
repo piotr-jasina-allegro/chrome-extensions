@@ -35,6 +35,6 @@ chrome.tabs.onActivated.addListener((activeInfo) => {
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     if (changeInfo.status === 'complete') {
-        initializePanel(tabId);
+        buildSite(tabId);
     }
 });

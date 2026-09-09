@@ -41,15 +41,18 @@ export async function setupAdp(options) {
         function fetchLink() {
             const anchors = Array.from(document.querySelectorAll('a'));
             console.log("EXT - looking for Kibana link among anchors:", anchors.map(a => a.textContent));
-            const kibanaLink = anchors.find(a => {
+            const foundLink = anchors.find(a => {
                 console.log("EXT - checking anchor:", a.textContent);
                 const text = a.textContent.toUpperCase();
                 return text.includes('KIBANA') && text.includes(env.toUpperCase());
             })?.href;
 
-            console.log("EXT - extracted kibanaLink:", kibanaLink, "for env:", env, "componentId:", componentId);
+            console.log("EXT - extracted kibanaLink:", foundLink, "for env:", env, "componentId:", componentId);
+            if (foundLink) {
+                kibanaLink = foundLink;
+            }
             chrome.storage.local.set({
-                [`link-${componentId}-${env}`]: kibanaLink
+                [`link-${componentId}-${env}`]: foundLink
             });
         }
         fetchLink();
