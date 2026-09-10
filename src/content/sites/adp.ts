@@ -95,16 +95,10 @@ export async function setupAdp(options: RenderOptions): Promise<void> {
         kibanaBtn.onclick = async () => {
             if (kibanaLink || linkFromStorage) {
                 window.open(kibanaLink || linkFromStorage, '_blank');
-            } else {
-                console.error(
-                    "Nie znaleziono linku 'Kibana - DEV' na tej stronie. Upewnij się, że sekcja Links jest załadowana.",
-                );
             }
         };
         if (kibanaLink || linkFromStorage) {
             htmlAnchorElement.parentNode?.insertBefore(kibanaBtn, htmlAnchorElement.nextSibling);
-        } else {
-            console.error("Nie znaleziono linku 'Kibana - DEV' na tej stronie.");
         }
     }
 
