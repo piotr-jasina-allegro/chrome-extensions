@@ -1,4 +1,5 @@
 import { setupJira } from '../src/content/sites/jira.js';
+import type { JiraIssue } from '../src/shared/types.js';
 
 describe('jira content script', () => {
     const sprintResponse = { values: [{ id: 4242 }] };
@@ -10,14 +11,46 @@ describe('jira content script', () => {
         await jest.runAllTimersAsync();
     };
 
+    /** In-memory stand-in for chrome.storage.local, backing get/set/remove. */
+    let store: Record<string, unknown>;
+
+    const setupChromeMock = (): void => {
+        store = {};
+        (globalThis as typeof globalThis & { chrome: typeof chrome }).chrome = {
+            storage: {
+                local: {
+                    get: jest.fn(async (keys?: string | string[] | null) => {
+                        if (keys === null || keys === undefined) {
+                            return { ...store };
+                        }
+                        const keyList = Array.isArray(keys) ? keys : [keys];
+                        const result: Record<string, unknown> = {};
+                        for (const key of keyList) {
+                            if (key in store) {
+                                result[key] = store[key];
+                            }
+                        }
+                        return result;
+                    }),
+                    set: jest.fn(async (items: Record<string, unknown>) => {
+                        Object.assign(store, items);
+                    }),
+                    remove: jest.fn(async (keys: string | string[]) => {
+                        for (const key of Array.isArray(keys) ? keys : [keys]) {
+                            delete store[key];
+                        }
+                    }),
+                },
+            },
+        } as unknown as typeof chrome;
+    };
+
     beforeEach(() => {
-        localStorage.clear();
         jest.restoreAllMocks();
         jest.useFakeTimers().setSystemTime(new Date('2025-11-20T10:00:00Z'));
+        localStorage.clear();
 
-        (globalThis as typeof globalThis & { chrome: typeof chrome }).chrome = {
-            storage: { local: { set: jest.fn() } },
-        } as unknown as typeof chrome;
+        setupChromeMock();
 
         globalThis.fetch = jest
             .fn()
@@ -32,22 +65,11 @@ describe('jira content script', () => {
         jest.useRealTimers();
     });
 
-    test('stores fetched issues under the current month key in localStorage and chrome.storage.local', async () => {
+    test('stores fetched issues under the current month key in chrome.storage.local', async () => {
         setupJira();
         await flushAsyncWork();
 
-        const stored = localStorage.getItem('issuesMont-2025-11');
-        expect(stored).not.toBeNull();
-        expect(JSON.parse(stored as string)).toEqual([['2025-11-20', issuesResponse.issues]]);
-
-        const chromeMock = (
-            globalThis as typeof globalThis & {
-                chrome: { storage: { local: { set: jest.Mock } } };
-            }
-        ).chrome;
-        expect(chromeMock.storage.local.set).toHaveBeenCalledWith({
-            'issuesMont-2025-11': [['2025-11-20', issuesResponse.issues]],
-        });
+        expect(store['issuesMont-2025-11']).toEqual([['2025-11-20', issuesResponse.issues]]);
     });
 
     test('trims extraneous Jira fields before persisting, keeping only what buildIssuesSummary needs', async () => {
@@ -77,8 +99,7 @@ describe('jira content script', () => {
         setupJira();
         await flushAsyncWork();
 
-        const stored = JSON.parse(localStorage.getItem('issuesMont-2025-11') as string);
-        expect(stored).toEqual([
+        expect(store['issuesMont-2025-11']).toEqual([
             [
                 '2025-11-20',
                 [
@@ -97,66 +118,54 @@ describe('jira content script', () => {
     });
 
     test('re-trims previously stored bloated snapshots on read, so old oversized data does not persist forever', async () => {
-        localStorage.setItem(
-            'issuesMont-2025-11',
-            JSON.stringify([
+        store['issuesMont-2025-11'] = [
+            [
+                '2025-11-01',
                 [
-                    '2025-11-01',
-                    [
-                        {
-                            key: 'OLD-1',
-                            fields: { summary: 'Old task', status: { id: '1' } },
-                            description: 'X'.repeat(100_000),
-                        },
-                    ],
+                    {
+                        key: 'OLD-1',
+                        fields: { summary: 'Old task', status: { id: '1' } },
+                        description: 'X'.repeat(100_000),
+                    },
                 ],
-            ]),
-        );
+            ],
+        ];
 
         setupJira();
         await flushAsyncWork();
 
-        const stored = JSON.parse(localStorage.getItem('issuesMont-2025-11') as string);
-        const oldDayEntry = stored.find(([date]: [string, unknown]) => date === '2025-11-01');
+        const stored = store['issuesMont-2025-11'] as [string, unknown][];
+        const oldDayEntry = stored.find(([date]) => date === '2025-11-01') as [string, unknown];
         expect(oldDayEntry[1]).toEqual([
             { key: 'OLD-1', fields: { summary: 'Old task', status: { id: '1' } } },
         ]);
         expect(JSON.stringify(oldDayEntry)).not.toContain('X'.repeat(100_000));
     });
 
-    test('prunes the oldest stored days and retries once when localStorage.setItem throws QuotaExceededError', async () => {
-        localStorage.setItem(
-            'issuesMont-2025-11',
-            JSON.stringify(
-                Array.from({ length: 20 }, (_, i) => [
-                    `2025-11-${String(i + 1).padStart(2, '0')}`,
-                    [{ key: `OLD-${i}`, fields: { summary: 'Old', status: { id: '1' } } }],
-                ]),
-            ),
-        );
+    test('prunes the oldest stored days and retries once when chrome.storage.local.set rejects with a quota error', async () => {
+        store['issuesMont-2025-11'] = Array.from({ length: 20 }, (_, i) => [
+            `2025-11-${String(i + 1).padStart(2, '0')}`,
+            [{ key: `OLD-${i}`, fields: { summary: 'Old', status: { id: '1' } } }],
+        ]);
 
-        const quotaError = new DOMException('quota exceeded', 'QuotaExceededError');
-        const originalSetItem = Storage.prototype.setItem.bind(localStorage);
-        const setItemSpy = jest
-            .spyOn(Storage.prototype, 'setItem')
-            .mockImplementationOnce(() => {
-                throw quotaError;
+        const chromeMock = (globalThis as typeof globalThis & { chrome: typeof chrome }).chrome;
+        const setMock = chromeMock.storage.local.set as jest.Mock;
+        setMock
+            .mockImplementationOnce(async () => {
+                throw new Error('QUOTA_BYTES_PER_ITEM quota exceeded');
             })
-            .mockImplementation((key, value) => {
-                // second call (after pruning) succeeds via the real implementation
-                originalSetItem(key, value);
+            .mockImplementation(async (items: Record<string, unknown>) => {
+                Object.assign(store, items);
             });
 
         setupJira();
         await flushAsyncWork();
 
-        expect(setItemSpy).toHaveBeenCalledTimes(2);
-        const stored = JSON.parse(localStorage.getItem('issuesMont-2025-11') as string);
+        expect(setMock).toHaveBeenCalledTimes(2);
+        const stored = store['issuesMont-2025-11'] as [string, unknown][];
         // pruned down to at most 14 days + today
         expect(stored.length).toBeLessThanOrEqual(15);
-        expect(stored.some(([date]: [string, unknown]) => date === '2025-11-20')).toBe(true);
-
-        setItemSpy.mockRestore();
+        expect(stored.some(([date]) => date === '2025-11-20')).toBe(true);
     });
 
     test('logs an error and stores nothing when there is no active sprint', async () => {
@@ -172,6 +181,41 @@ describe('jira content script', () => {
         await flushAsyncWork();
 
         expect(errorSpy).toHaveBeenCalledWith('Błąd pobierania danych:', expect.any(Error));
-        expect(localStorage.getItem('issuesMont-2025-11')).toBeNull();
+        expect(store['issuesMont-2025-11']).toBeUndefined();
+    });
+
+    test('removes issuesMont keys for months older than the last 3', async () => {
+        store['issuesMont-2025-08'] = [['2025-08-01', []]];
+        store['issuesMont-2025-09'] = [['2025-09-01', []]];
+        store['issuesMont-2025-10'] = [['2025-10-01', []]];
+
+        setupJira();
+        await flushAsyncWork();
+
+        expect(store['issuesMont-2025-08']).toBeUndefined();
+        expect(store['issuesMont-2025-09']).toEqual([['2025-09-01', []]]);
+        expect(store['issuesMont-2025-10']).toEqual([['2025-10-01', []]]);
+        expect(store['issuesMont-2025-11']).toBeDefined();
+    });
+
+    test('migrates legacy issuesMont data still sitting in localStorage into chrome.storage.local without losing it', async () => {
+        localStorage.setItem(
+            'issuesMont-2025-10',
+            JSON.stringify([
+                ['2025-10-05', [{ key: 'LEGACY-1', fields: { summary: 'Legacy', status: { id: '1' } } }]],
+            ]),
+        );
+        // Chrome storage already has a different day for the same month; it must be preserved too.
+        store['issuesMont-2025-10'] = [
+            ['2025-10-10', [{ key: 'EXISTING-1', fields: { summary: 'Existing', status: { id: '2' } } }]],
+        ];
+
+        setupJira();
+        await flushAsyncWork();
+
+        expect(localStorage.getItem('issuesMont-2025-10')).toBeNull();
+        const merged = store['issuesMont-2025-10'] as [string, JiraIssue[]][];
+        const dates = merged.map(([date]) => date).sort();
+        expect(dates).toEqual(['2025-10-05', '2025-10-10']);
     });
 });
