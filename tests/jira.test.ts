@@ -142,30 +142,32 @@ describe('jira content script', () => {
         expect(JSON.stringify(oldDayEntry)).not.toContain('X'.repeat(100_000));
     });
 
-    test('prunes the oldest stored days and retries once when chrome.storage.local.set rejects with a quota error', async () => {
-        store['issuesMont-2025-11'] = Array.from({ length: 20 }, (_, i) => [
+    test('logs the error without dropping any stored days when chrome.storage.local.set rejects with a quota error', async () => {
+        const previousDays = Array.from({ length: 20 }, (_, i) => [
             `2025-11-${String(i + 1).padStart(2, '0')}`,
             [{ key: `OLD-${i}`, fields: { summary: 'Old', status: { id: '1' } } }],
         ]);
+        store['issuesMont-2025-11'] = previousDays;
 
         const chromeMock = (globalThis as typeof globalThis & { chrome: typeof chrome }).chrome;
         const setMock = chromeMock.storage.local.set as jest.Mock;
-        setMock
-            .mockImplementationOnce(async () => {
-                throw new Error('QUOTA_BYTES_PER_ITEM quota exceeded');
-            })
-            .mockImplementation(async (items: Record<string, unknown>) => {
-                Object.assign(store, items);
-            });
+        setMock.mockImplementationOnce(async () => {
+            throw new Error('QUOTA_BYTES_PER_ITEM quota exceeded');
+        });
+
+        const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
 
         setupJira();
         await flushAsyncWork();
 
-        expect(setMock).toHaveBeenCalledTimes(2);
-        const stored = store['issuesMont-2025-11'] as [string, unknown][];
-        // pruned down to at most 14 days + today
-        expect(stored.length).toBeLessThanOrEqual(15);
-        expect(stored.some(([date]) => date === '2025-11-20')).toBe(true);
+        expect(setMock).toHaveBeenCalledTimes(1);
+        expect(errorSpy).toHaveBeenCalledWith(
+            'Błąd zapisu danych (quota przekroczona):',
+            expect.any(Error),
+        );
+        // The write failed, so the previously stored days must remain untouched -
+        // no retry that silently drops older days from the last months.
+        expect(store['issuesMont-2025-11']).toEqual(previousDays);
     });
 
     test('logs an error and stores nothing when there is no active sprint', async () => {

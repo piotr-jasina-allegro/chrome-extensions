@@ -34,14 +34,6 @@ function toStoredIssue(issue: JiraIssue): JiraIssue {
     };
 }
 
-/** Removes the oldest date entries from a month's issue map, keeping at most `keep` days. */
-function pruneOldestDays(issuesMap: Map<string, JiraIssue[]>, keep: number): void {
-    const sortedDates = [...issuesMap.keys()].sort();
-    for (const date of sortedDates.slice(0, Math.max(0, sortedDates.length - keep))) {
-        issuesMap.delete(date);
-    }
-}
-
 /** Returns the `YYYY-MM` string for the month `monthsAgo` months before today. */
 function getYearMonthMonthsAgo(monthsAgo: number): string {
     const date = new Date();
@@ -211,16 +203,8 @@ export function setupJira(): void {
             try {
                 await persist();
                 console.log(`Saved ${storageKey}`);
-            } catch {
-                // Even trimmed daily snapshots can add up over a long month; drop the
-                // oldest days and retry once rather than losing today's data entirely.
-                pruneOldestDays(issuesMap, 14);
-                try {
-                    await persist();
-                    console.log(`Saved ${storageKey} after pruning older days`);
-                } catch (retryError) {
-                    console.error('Błąd zapisu danych (quota nadal przekroczona):', retryError);
-                }
+            } catch (persistError) {
+                console.error('Błąd zapisu danych (quota przekroczona):', persistError);
             }
         })
         .catch((err) => console.error('Błąd pobierania danych:', err));
